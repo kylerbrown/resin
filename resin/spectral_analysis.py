@@ -13,81 +13,96 @@ try:
 except:
     FFT_FN = nx.fft.fft
     USE_SCIPY = False
-# Load fast C multi-taper library if installed
-try:
-    import multitaper
-    USE_MULTITAPER_LIB = True
-except ImportError:
-    USE_MULTITAPER_LIB = False
 
-
-class Spectrum:
-    """Computes time-freqeuncy spectral features on continuously sampled signals.
-    Spectral features based on Sound Analysis Pro (SAP)."""
-    def __init__(self, signal, rate, fft_fn='SAP', freq_range=None, 
-                 NFFT=1024, FFT_advance_ms=1.36, data_window_ms=9.27, 
-                 n_tapers=4, NW=1.5):
+class _BaseSpectra:
+    def __init__(self,
+                 rate=1,
+                 freq_range=None,
+                 NFFT=1024,
+                 noverlap=512,
+                 data_window=1024,
+                 n_tapers=4,
+                 NW=1.5):
         """
-        signal - a sampled data array
         rate   - the sampling rate of the signal
-        fft_fn - the fourier transform function. May be 'SAP', 'multitaper' or a custom function.
-                    If 'SAP': uses SAP's multitaper estimate. n_tapers and NW are ignored.
-                    If 'multitaper': creates a custom multitaper estimate
-                    A custom fourier transform function: 
-                        should accept the arguments (time_series, sampling, NFFT)
-                        and return (spectrum, freqs)
         NFFT   - number of points in Fourier transform
-        FFT_advance_ms - Distance between two consecutive short Fourier transforms, in milliseconds
-        data_window_ms - amount of data to include in the short Fourier transform,
-                              in milliseconds
+        noverlap - number of overlapping samples between two consecutive short Fourier transforms
+        data_window - amount of data to include in the short Fourier transform
         n_tapers - Number of tapers to use in a custom multi-taper Fourier transform estimate
         NW    - multi-taper bandwidth parameter for custom multi-taper Fourier transform estimate
-                increasing this value reduces side-band ripple
+                increasing this value reduces side-band ripple,
+                decreasing sharpens peaks
         """
-        sample_rate_ms = rate / 1000
+        self._rate = rate
         self._NFFT = NFFT
-        self._data_in_window = int(data_window_ms * sample_rate_ms)
-        self._noverlap = int((data_window_ms - FFT_advance_ms) * sample_rate_ms)
-        self._freq_range = freq_range
-        if fft_fn == 'SAP':  # use sap defaults
-            self._fft_fn = SAP_fft_fn(data_window_ms, FFT_advance_ms, rate)
-        elif fft_fn == 'multitaper':
-            self._fft_fn = multi_taper_fft_fn(n_tapers, NFFT, NW, 
-                                              data_window_ms, FFT_advance_ms, rate)
+        self._data_in_window = data_window
+        self._noverlap = noverlap
+        freqs = frequencies(NFFT, rate)
+        if freq_range is not None:
+            freq_mask = (freqs >= freq_range[0]) & (
+                freqs < freq_range[1])
+            self._freqs = freqs[freq_mask]
         else:
-            self._fft_fn = fft_fn
-        if signal is not None:
-            self.analyze_signal(signal, rate)
-        
-    def analyze_signal(self, signal, rate):
-        # pxx dimensions: F x T x k, F: frequencies
-        #                            T: times
-        #                            k: tapers
-        pxx, freqs, times = \
-          multi_taper_psd(signal,
-                          rate,
-                          NFFT=self._NFFT,
-                          noverlap=self._noverlap,
-                          freq_range=self._freq_range,
-                          data_in_window=self._data_in_window,
-                          multi_taper_fn=self._fft_fn)
-        self._pxx, self._freqs, self._psd_times = (pxx, freqs, times)
+            self._freqs = freqs
+        self._freq_range = freq_range
+        self.tapers = calc_tapers(data_window, NW / data_window, n_tapers)
+        self.lambdas = calc_lambdas(data_window, NW / data_window, self.tapers)
+
+    def multi_taper_gen(self, signal):
+        multi_taper_gen = \
+            gen_multi_taper_psd(signal,
+            self._rate,
+            NFFT=self._NFFT,
+            noverlap=self._noverlap,
+            freq_range=self._freq_range,
+            data_in_window=self._data_in_window,
+                                tapers=self.tapers,
+                                lambdas=self.lambdas)
+        self._multi_taper_gen = multi_taper_gen
+
+class ISpectra(_BaseSpectra):
+    """Iterable Spectra
+    A subclass of Spectra designed to stream very large spectra"""
+    def signal(self, signal):
+        "Compute power spectra for sampled data in signal."
+        self.multi_taper_gen(signal)
+        return self
+
+    def power(self):
+        """returns an iterable power spectra, iterates over power spectra windows"""
+        for pxx, time in self._multi_taper_gen:
+            yield nx.sum((pxx * nx.conj(pxx)).real, axis=-1), time
+
+
+class Spectra(_BaseSpectra):
+    """Computes time-freqeuncy spectral features on continuously sampled signals.
+    Spectral features based on Sound Analysis Pro (SAP)."""
+    def signal(self, signal):
+        """Compute power spectra for sampled data in signal.
+         pxx dimensions: F x T x k, F: frequencies
+                                    T: times
+                                    k: tapers"""
+        self.multi_taper_gen(signal)
+        pxx, times = multi_taper_psd(self._multi_taper_gen)
+        self._pxx, self._psd_times = (pxx, times)
         self._power = None
+        return self
 
     def power(self, freq_range=None):
         if self._power is None:
             self._power = nx.sum((self._pxx * nx.conj(self._pxx)).real, axis=2)
         if freq_range is None:
             return self._power, self._freqs, self._psd_times
-        freq_slice = nx.where(nx.logical_and(self._freqs > freq_range[0],
-                                             self._freqs < freq_range[1]))[0]
-        pxx = self._power[freq_slice, :]
-        freqs = self._freqs[freq_slice, :]
+        freq_mask = (self._freqs >= freq_range[0]) & (
+            self._freqs < freq_range[1])
+        pxx = self._power[freq_mask]
+        freqs = self._freqs[freq_mask]
         return pxx, freqs, self._psd_times
 
+
     def freq_of_cumulative_power(self,
-                                      freq_range=None,
-                                      ratio_of_cum_power=0.5):
+                                 freq_range=None,
+                                 ratio_of_cum_power=0.5):
         power, freqs, times = self.power(freq_range=freq_range)
         total_power = power.sum(0)
         # avoids divide by zero
@@ -113,9 +128,9 @@ class Spectrum:
         return freq_values, times
 
     def amplitude(self,
-                       freq_range=None,
-                       noise_threshold=None,
-                       noise_ratio=None):
+                  freq_range=None,
+                  noise_threshold=None,
+                  noise_ratio=None):
         noise_power = None
         if (noise_threshold and noise_ratio):
             noise_power = self.power(freq_range=(0, noise_threshold))[0]
@@ -132,20 +147,17 @@ class Spectrum:
         return wiener_entropy(pxx, freqs, self._psd_times)
 
     def spec_derivative(self, freq_range=None, phi=0):
-        # phi = 0 calculates a spec derivative across time
-        # phi = pi/2 calculates a spec derivative across frequency
+        """
+        phi = 0 calculates a spec derivative across time
+        phi = pi/2 calculates a spec derivative across frequency"""
         freq_slice = nx.arange(len(self._freqs))
         if freq_range is not None:
-            freq_slice = nx.where((self._freqs > freq_range[0]) & 
-                                  (self._freqs < freq_range[1]))[0]
+            freq_slice = nx.where((self._freqs > freq_range[0]) & (
+                self._freqs < freq_range[1]))[0]
         pxx = self._pxx[freq_slice, :, :]
         S = pxx[:, :, :-1] * nx.conj(pxx[:, :, 1:])
         S = nx.real(S * nx.exp(1j * phi))
         temp_sum = nx.sum(S, axis=2)
-        #    taper_count = pxx.shape[2] # size of dimension k
-        #    temp_sum = nx.zeros(pxx.shape[:-1])
-        #    for taper in range(taper_count-1):
-        #      temp_sum += nx.real(pxx[:,:,taper]*pxx[:,:,taper+1])
         return temp_sum, self._freqs[freq_slice], self._psd_times
 
     def time_derivative(self, freq_range=None):
@@ -196,15 +208,19 @@ class Spectrum:
         return max_spec_deriv, freqs, times
 
     def goodness_of_pitch(self, freq_range=None):
-        max_ds, freqs, times = self.max_spec_derivative(
-            freq_range=freq_range)
+        max_ds, freqs, times = self.max_spec_derivative(freq_range=freq_range)
         pxx, freqs, times = self.power(freq_range)
         norm_max_ds = max_ds / pxx
         estimates2 = FFT_FN(norm_max_ds, axis=0)
         g_of_p = nx.max(nx.abs(estimates2), axis=0)
         return g_of_p, times
-    def spectrogram(self, ax=None, freq_range=None, 
-                    dB_thresh=35, derivative=True, colormap='inferno'):
+
+    def spectrogram(self,
+                    ax=None,
+                    freq_range=None,
+                    dB_thresh=35,
+                    derivative=True,
+                    colormap='inferno'):
         """Plots a spectrogram, requires matplotlib
         ax - axis on which to plot
         freq_range - a tuple of frequencies, eg (300, 8000)
@@ -212,7 +228,7 @@ class Spectrum:
                         to improve detail
         derivative - if True, plots the spectral derivative, SAP style
         colormap   - colormap to use, good values: 'inferno', 'gray'
-        
+
         Returns an axis object
         """
         from matplotlib import colors
@@ -221,25 +237,31 @@ class Spectrum:
             ax = plt.gca()
         if derivative:
             pxx, f, t = self.max_spec_derivative(freq_range=freq_range)
-            thresh = value_from_dB(dB_thresh, pxx)
-            ax.pcolorfast(t, f, pxx, cmap=colormap, 
+            thresh = value_from_dB(dB_thresh, nx.max(pxx))
+            ax.pcolorfast(t,
+                          f,
+                          pxx,
+                          cmap=colormap,
                           norm=colors.SymLogNorm(linthresh=thresh))
         else:
             pxx, f, t = self.power(freq_range)
-            thresh = value_from_dB(dB_thresh, pxx)
-            ax.pcolorfast(t, f, pxx, cmap=colormap,
+            thresh = value_from_dB(dB_thresh, nx.max(pxx))
+            ax.pcolorfast(t,
+                          f,
+                          pxx,
+                          cmap=colormap,
                           norm=colors.LogNorm(vmin=thresh))
         return ax
 
 
-def value_from_dB(dB, pxx):
-    """Converts a dB value to an absolute value, relative to the maximum value in pxx"""
-    return 10 ** (nx.log10(nx.max(nx.abs(pxx))) - dB / 10)
-
-
-def multi_taper_fft_fn(n_tapers, NFFT=1024, NW=1.5, data_window=9.27, FFT_advance=1.36, sample_rate=44.100e3):
+def multi_taper_fft_fn(n_tapers,
+                       NFFT=1024,
+                       NW=1.5,
+                       data_window=9.27,
+                       FFT_advance=1.36,
+                       sample_rate=44.100e3):
     """Creates a generic multi-taper fft function
-    
+
   Parameters:
     data_window : size of the data window, in ms
     FFT_advance : time interval to advance window for
@@ -257,48 +279,39 @@ def multi_taper_fft_fn(n_tapers, NFFT=1024, NW=1.5, data_window=9.27, FFT_advanc
     padded_tapers[:, :data_in_window] = tapers
     return get_multi_taper_fn(padded_tapers, lambdas, NFFT)
 
-def SAP_fft_fn(data_window=9.27, FFT_advance=1.36, sample_rate=44.100e3):
-    """
-  Generates a multitaper fft function compatible with the FFT in SAP.
-  Ideally, the FFT in scipy will be used (SAP uses FFTW
-  for FFTs, as does scipy).
-
-  SAP uses a two tapered MTM.  The two tapers are the
-  first two (i.e. two whose lambda values are closest to
-  one) in a calculation for 4 tapers.  Tapers are not
-  weighted by lambda value.  The normalization of
-  tapers is broken, and the tapers are multiplied
-  by a scaling factor to replicate the scaling factor
-  in SAP.  SAP uses a bandwidth parameter of
-  1.5 and a fixed FFT size of 1024 points.
-
-  Parameters:
-    data_window : size of the data window, in ms
-    FFT_advance : time interval to advance window for
-                  each subsequent FFT
-    sample_rate : sample rate, in samples/ms
-  Returns:
-    an fft_fn
-  """
-    sample_rate_ms = sample_rate / 1000
-    NW = 1.5
-    NFFT = 1024
-    data_in_window = int(data_window * sample_rate_ms)
-    noverlap = int(data_in_window - FFT_advance * sample_rate_ms)
-
-    tapers4 = calc_tapers(data_in_window, NW / data_in_window, 4)
-    lambdas4 = calc_lambdas(data_in_window, NW / data_in_window, tapers4)
-    # take only first two tapers and fill out to use full NFFT
-    # length
-    tapers = nx.zeros((2, NFFT))
-    tapers[:, :data_in_window] = tapers4[0:2, :]
-    # no taper weighting done by SAP
-    lambdas = nx.ones((2, ))
-    # normalization on tapers is broken (see multitap() in tapers.c)
-    tapers = tapers * nx.sqrt(data_in_window)
-    return get_multi_taper_fn(tapers, lambdas, NFFT)
-
 # --- spectral feature functions ---
+def frequencies(NFFT, rate):
+    """
+    NFFT : number of FFT points
+    rate : sampling rate
+    Returns a vector of frequencies given
+    """
+    return nx.arange(0, rate/2, rate/2 / (NFFT / 2 + 1))
+
+
+def value_from_dB(dB, ref_power):
+    """Converts a dB value to an absolute value, relative to the maximum value in pxx"""
+    return 10**(nx.log10(ref_power) - dB / 10)
+
+def power_spectra_to_dB(pxx, dB_thresh=70, ref_power=None, derivative=False):
+    """ Converts an array to decibels.
+
+    If derivative is True, negative values are treated as a second logarithmic scale.
+    see also: amplitude()
+    """
+    if ref_power is None:
+        ref_power = nx.max(pxx)
+    abs_thresh = value_from_dB(dB_thresh, ref_power)
+    if not derivative:
+        pxx[pxx < abs_thresh] = abs_thresh
+        return 10 * np.log10(pxx / abs_thresh)
+    pxx[(pxx >= 0) & (pxx < abs_thresh)] = abs_thresh
+    pxx[(pxx < 0) & (pxx > -abs_thresh)] = -abs_thresh
+    pxx[pxx > 0] = 10 * np.log10(pxx[pxx > 0] / abs_thresh)
+    pxx[pxx < 0] = -10 * np.log10(-pxx[pxx < 0] / abs_thresh)
+    return pxx
+
+
 
 
 def noise_filter(psd, freqs, amp, t, noise_ratio=0.5, noise_cutoff=500):
@@ -382,6 +395,7 @@ def wiener_entropy(psd, freqs, t):
     wiener = log_geo_mean - nx.log(arth_mean)
     return wiener, t
 
+
 def spec_deriv_reduce_fn(estimates):
     # estimates2 is K x N array, where K is taper number
     # and N is frequency number
@@ -425,13 +439,9 @@ def spec_deriv_reduce_fn(estimates):
     spec_deriv = time_deriv * max_cos - freq_deriv * max_sin
     return spec_deriv
 
-def multi_taper_psd(signal,
-                    rate,
-                    NFFT,
-                    noverlap,
-                    freq_range,
-                    data_in_window,
-                    multi_taper_fn):
+
+def gen_multi_taper_psd(signal, rate, NFFT, noverlap, freq_range,
+                        data_in_window, tapers, lambdas):
     """
   Calculates an MTM PSD from the signal.
 
@@ -447,57 +457,60 @@ def multi_taper_psd(signal,
                      as tuple
     data_in_window : if specified, subset of NFFT point count
                      to include in FFT calcuation
+  yields:
+    spectrum   : N length vector of power values at each frequency
+    freqs : vector of size N containing frequency at each index
+            N
+    time : the start sample time in seconds
+    """
+    # NFFT determines the number of windows
+    signal = signal.reshape(-1)
+    if data_in_window > NFFT:
+        data_in_window = NFFT
+        print('warning, data window larger than NFFT')
+    window_starts = range(0, len(signal), data_in_window - noverlap)
+    freqs = frequencies(NFFT, rate)
+    if freq_range:
+        freq_mask = (freqs >= freq_range[0]) & (freqs < freq_range[1])
+    for window_start in range(0, len(signal), data_in_window - noverlap):
+        signal_interval = signal[window_start:window_start + data_in_window]
+        spectrum = multi_taper(signal_interval, rate, tapers, lambdas, NFFT)
+        if freq_range is not None:
+            yield spectrum[freq_mask], window_start / rate
+        else:
+            yield spectrum, window_start / rate
+
+def multi_taper_psd(psd_generator):
+    """
+  Calculates an MTM PSD from the signal.
+
+  Parameters:
+    psd_generator  : see gen_multi_taper_psd()
+
   Returns:
-    pxx   : NxM matrix of power values at each frequency
+    pxx   : NxMxT matrix of power values at each frequency, where T is the number of tapers
     freqs : vector of size N containing frequency at each index
             N
     times : vector of size M containing times corresponding to
             each index M
   """
-    # NFFT determines the number of windows
-    if  data_in_window > NFFT:
-        data_in_window = NFFT
-        print('warning, data window larger than NFFT')
-    window_count = int(len(signal) / (data_in_window - noverlap))
-    if (window_count * (data_in_window - noverlap) < len(signal)):
-        window_count += 1
-        expanded_signal = nx.zeros((window_count * (data_in_window - noverlap),
-                                    ))
-        expanded_signal[0:len(signal)] = signal
-        signal = expanded_signal
-    window_starts = nx.arange(window_count) * (data_in_window - noverlap)
-    rate = rate
-    times = window_starts / rate
-    pxx = None
-    window_index = 0
-    for window_start in window_starts:
-        signal_interval = signal[window_start:(window_start + data_in_window)]
-        spectrum, freqs = multi_taper_fn(signal_interval, rate, NFFT)
-        taper_count = spectrum.shape[1]
-        if pxx is None:
-            pxx = nx.zeros(
-                (len(freqs), len(window_starts), taper_count),
-                dtype=complex)
-        pxx[:, window_index, :] = spectrum
-        window_index += 1
+    pxx = []
+    t = []
+    for spectrum, time in psd_generator:
+        pxx.append(spectrum)
+        t.append(time)
+    pxx = nx.swapaxes(nx.array(pxx), 0, 1)  # freq needs to be first dim
+    return pxx, nx.array(t)
 
-    if freq_range is not None:
-        d_freq = freqs[1] - freqs[0]
-        min_freq, max_freq = freq_range
-
-        min_index, max_index = (min_freq / d_freq, max_freq / d_freq)
-        freqs = freqs[min_index:max_index]
-        pxx = pxx[min_index:max_index, :]
-
-    return pxx, freqs, times
 
 # --- Multi-taper machinery ---
 
+
 def taper_diags(N, W):
     t = nx.arange(0, N)
-    diag = (N - 1. - 2. * t)**2. / 4. * nx.cos(2 * nx.pi * W)
+    diag = (N - 1 - 2 * t)**2 / 4 * nx.cos(2 * nx.pi * W)
     t = nx.arange(1, N)
-    off_diag = t * (N - t) / 2.0
+    off_diag = t * (N - t) / 2
     return diag, off_diag
 
 
@@ -584,25 +597,6 @@ def calc_lambdas(N, W, tapers):
     return nx.array(lambdas)
 
 
-def get_multi_taper_fn(tapers, lambdas, NFFT):
-    if USE_MULTITAPER_LIB:
-        # Returns a fast multi-taper function, requires the multitaper library
-        mt = multitaper.multi_taper_estimate(tapers, lambdas)
-        def mt_fn(time_series, sampling, NFFT):
-            pxx = mt(time_series)
-            freqs = nx.arange(len(pxx)) / len(pxx) * sampling / 2
-            return pxx, freqs
-        return mt_fn
-    else:
-        # Use a pure python multi-taper implemenation
-        def mt_fn(time_series, sampling, NFFT):
-            return multi_taper(time_series,
-                               sampling,
-                               tapers=tapers,
-                               lambdas=lambdas,
-                               NFFT=NFFT)
-        return mt_fn
-
 def multi_taper(signal, rate, tapers, lambdas, NFFT):
     """ Calculates a single MTM.
 
@@ -615,27 +609,15 @@ def multi_taper(signal, rate, tapers, lambdas, NFFT):
     NFFT        : size of transform
   Return:
     spec  : vector of length N containing power spectrum
-    freqs : vector of length N containing frequencies
-            corresponding to each N index
   """
-    N = len(signal)
-    if N != NFFT:
-        if N < NFFT:
-            s = nx.zeros((NFFT, ))
-            s[0:int(N)] = signal
-            signal = s
-        else:
-            signal = signal[0:NFFT]
-        N = NFFT
-
     # generate weighted signals
     weights = lambdas
     # generates an taper_count x N array, where
     # each row (k) is signal * taper (k)
-    estimates2 = signal * tapers
+    estimates2 = signal * tapers[:, :len(signal)]
     # calculates 1D FFT for each row in one call
-    estimates2 = FFT_FN(estimates2, axis=1)
-    estimates2 = estimates2[:, 0:(N // 2 + 1)] * weights[:, nx.newaxis]
+    estimates2 = FFT_FN(estimates2, n=NFFT, axis=1)
+    estimates2 = estimates2[:, 0:(NFFT // 2 + 1)] * weights[:, nx.newaxis]
     spectrum2 = estimates2.transpose()
 
     ### I used the code below to verify that
@@ -653,7 +635,4 @@ def multi_taper(signal, rate, tapers, lambdas, NFFT):
     #  spectrum = estimates.sum(0)
     #  if (nx.any(spectrum != spectrum2)):
     #    print 'Not equal!'
-
-    max_freq = rate / 2
-    freqs = nx.arange(0, max_freq, max_freq / (N / 2 + 1))
-    return spectrum2, freqs
+    return spectrum2

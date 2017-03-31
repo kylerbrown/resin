@@ -20,18 +20,17 @@ pip install .
 ## Usage example
 
 ```python
-from resin import Spectrum
-spect = Spectrum(data, sampling_rate)
+from resin import Spectra
+spect = Spectrum(sampling_rate).signal(data)
 spect.spectrogram(freq_range=(300, 90000))
 ```
 
 ![Example spectrogram](spectrogram_example.png)
 
 ## Authors
-Resin is released under the Gnu Public License by Kyler Brown, 2017.
-
-Resin is a fork of `segmentation` by Mike Lusignan.
 
 Mike Lusignan wrote `segmentation` as part of his PhD thesis. Details of the algorithms can be found in: 
 Lusignan, M. E. University of Chicago. (2012). [_Growing up singing: Behavioral and physiological perspectives on song acquisition_]( http://pi.lib.uchicago.edu/1001/cat/bib/9370223).
+
+Resin is a fork of `segmentation`, writen by Kyler Brown, 2017.
 
