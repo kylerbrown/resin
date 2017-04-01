@@ -21,8 +21,14 @@ pip install .
 
 ```python
 from resin import Spectra
-spect = Spectrum(sampling_rate).signal(data)
-spect.spectrogram(freq_range=(300, 90000))
+spect = Spectra(rate=30000, 
+		NFFT=512,
+		data_window=500,
+		noverlap=412,
+		n_tapers=4,
+		freq_range=(300, 90000))
+spec.signal(data)
+spect.spectrogram()
 ```
 
 ![Example spectrogram](spectrogram_example.png)
