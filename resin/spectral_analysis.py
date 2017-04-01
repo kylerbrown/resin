@@ -455,7 +455,7 @@ def gen_multi_taper_psd(signal, rate, NFFT, noverlap, freq_range,
                      is a taper of length N
     lambdas        : vector of M lambdas for M tapers
     NFFT           : size of FFT window
-    noverlap       : window overlap, in points
+    noverlap       : FFT window overlap, in points
     freq_range     : range of frequencies to include in Hz,
                      as tuple
     data_in_window : if specified, subset of NFFT point count
@@ -475,7 +475,7 @@ def gen_multi_taper_psd(signal, rate, NFFT, noverlap, freq_range,
     freqs = frequencies(NFFT, rate)
     if freq_range:
         freq_mask = (freqs >= freq_range[0]) & (freqs < freq_range[1])
-    for window_start in range(0, len(signal), data_in_window - noverlap):
+    for window_start in range(0, len(signal), NFFT - noverlap):
         signal_interval = signal[window_start:window_start + data_in_window]
         spectrum = multi_taper(signal_interval, rate, tapers, lambdas, NFFT)
         if freq_range is not None:
