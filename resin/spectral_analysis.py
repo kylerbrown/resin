@@ -37,13 +37,7 @@ class _BaseSpectra:
         self._NFFT = NFFT
         self._data_in_window = data_window
         self._noverlap = noverlap
-        freqs = frequencies(NFFT, rate)
-        if freq_range is not None:
-            freq_mask = (freqs >= freq_range[0]) & (
-                freqs < freq_range[1])
-            self._freqs = freqs[freq_mask]
-        else:
-            self._freqs = freqs
+        self._freqs = frequencies(NFFT, rate, freq_range)
         self._freq_range = freq_range
         self.tapers = calc_tapers(data_window, NW / data_window, n_tapers)
         self.lambdas = calc_lambdas(data_window, NW / data_window, self.tapers)
@@ -72,7 +66,12 @@ class ISpectra(_BaseSpectra):
         """returns an iterable power spectra, iterates over power spectra windows"""
         for pxx, time in self._multi_taper_gen:
             yield nx.sum((pxx * nx.conj(pxx)).real, axis=-1), time
-
+    def power_dB(self, dB_thresh=70, ref_power=None):
+        for pxx, t in self.power():
+            yield power_spectra_to_dB(pxx,
+                                      dB_thresh=70,
+                                      ref_power=None,
+                                      derivative=False), t
 
 class Spectra(_BaseSpectra):
     """Computes time-freqeuncy spectral features on continuously sampled signals.
@@ -280,13 +279,17 @@ def multi_taper_fft_fn(n_tapers,
     return get_multi_taper_fn(padded_tapers, lambdas, NFFT)
 
 # --- spectral feature functions ---
-def frequencies(NFFT, rate):
+def frequencies(NFFT, rate, freq_range=None):
     """
     NFFT : number of FFT points
     rate : sampling rate
     Returns a vector of frequencies given
     """
-    return nx.arange(0, rate/2, rate/2 / (NFFT / 2 + 1))
+    freqs = nx.arange(0, rate/2, rate/2 / (NFFT / 2 + 1))
+    if freq_range is None:
+        return freqs
+    freq_mask = (freqs >= freq_range[0]) & (freqs < freq_range[1])
+    return freqs[freq_mask]
 
 
 def value_from_dB(dB, ref_power):
@@ -304,11 +307,11 @@ def power_spectra_to_dB(pxx, dB_thresh=70, ref_power=None, derivative=False):
     abs_thresh = value_from_dB(dB_thresh, ref_power)
     if not derivative:
         pxx[pxx < abs_thresh] = abs_thresh
-        return 10 * np.log10(pxx / abs_thresh)
+        return 10 * nx.log10(pxx / abs_thresh)
     pxx[(pxx >= 0) & (pxx < abs_thresh)] = abs_thresh
     pxx[(pxx < 0) & (pxx > -abs_thresh)] = -abs_thresh
-    pxx[pxx > 0] = 10 * np.log10(pxx[pxx > 0] / abs_thresh)
-    pxx[pxx < 0] = -10 * np.log10(-pxx[pxx < 0] / abs_thresh)
+    pxx[pxx > 0] = 10 * nx.log10(pxx[pxx > 0] / abs_thresh)
+    pxx[pxx < 0] = -10 * nx.log10(-pxx[pxx < 0] / abs_thresh)
     return pxx
 
 
