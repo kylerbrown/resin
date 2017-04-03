@@ -5,10 +5,9 @@ Resin is a spectral analysis toolbox for Python inspired by [SAP](http://soundan
 + Python 2.7+
 + Numpy
 
-Optional Requirements -- for simiplicity [Anaconda](https://www.continuum.io/downloads) in recomended.
+Optional Requirements
 + Scipy
 + Matplotlib
-+ Multitaper (requires libfftw3)
 
 ## Installation
 
