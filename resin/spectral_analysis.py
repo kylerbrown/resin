@@ -66,6 +66,7 @@ class ISpectra(_BaseSpectra):
         """returns an iterable power spectra, iterates over power spectra windows"""
         for pxx, time in self._multi_taper_gen:
             yield nx.sum((pxx * nx.conj(pxx)).real, axis=-1), time
+
     def power_dB(self, dB_thresh=70, ref_power=None):
         for pxx, t in self.power():
             yield power_spectra_to_dB(pxx,
