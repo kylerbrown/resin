@@ -1,22 +1,23 @@
 # spectral_analysis.py written by Mike Lusignan 2012
-# revised API by Kyler Brown 2017
+# modified by Kyler Brown 2017
 from __future__ import division
-import numpy as nx
+import numpy as np
 
 # The following code attempts to grab the FFT
 # from scipy, if available.  Otherwise, the FFT from
 # numpy is used.
+# I find scipy to be about 50% faster
 try:
     import scipy.fftpack
-    FFT_FN = scipy.fftpack.fft
+    FFT_FN = scipy.fftpack.rfft
     USE_SCIPY = True
-except:
-    FFT_FN = nx.fft.fft
+except ImportError:
+    FFT_FN = np.fft.rfft
     USE_SCIPY = False
 
 class _BaseSpectra:
     def __init__(self,
-                 rate=1,
+                 rate,
                  freq_range=None,
                  NFFT=1024,
                  noverlap=512,
@@ -65,7 +66,7 @@ class ISpectra(_BaseSpectra):
     def power(self):
         """returns an iterable power spectra, iterates over power spectra windows"""
         for pxx, time in self._multi_taper_gen:
-            yield nx.sum((pxx * nx.conj(pxx)).real, axis=-1), time
+            yield np.sum((pxx * np.conj(pxx)).real, axis=-1), time
 
     def power_dB(self, dB_thresh=70, ref_power=None):
         for pxx, t in self.power():
@@ -90,7 +91,7 @@ class Spectra(_BaseSpectra):
 
     def power(self, freq_range=None):
         if self._power is None:
-            self._power = nx.sum((self._pxx * nx.conj(self._pxx)).real, axis=2)
+            self._power = np.sum((self._pxx * np.conj(self._pxx)).real, axis=2)
         if freq_range is None:
             return self._power, self._freqs, self._psd_times
         freq_mask = (self._freqs >= freq_range[0]) & (
@@ -106,10 +107,10 @@ class Spectra(_BaseSpectra):
         power, freqs, times = self.power(freq_range=freq_range)
         total_power = power.sum(0)
         # avoids divide by zero
-        total_power = nx.where(total_power != 0.0, total_power, 1.0)
+        total_power = np.where(total_power != 0.0, total_power, 1.0)
         power = power / total_power
         # calculate cum power
-        nx.cumsum(power, axis=0, out=power)
+        np.cumsum(power, axis=0, out=power)
         # each column should contain the cumulative ratio of power at a given
         # frequency
         below_ratio = power < ratio_of_cum_power
@@ -150,30 +151,30 @@ class Spectra(_BaseSpectra):
         """
         phi = 0 calculates a spec derivative across time
         phi = pi/2 calculates a spec derivative across frequency"""
-        freq_slice = nx.arange(len(self._freqs))
+        freq_slice = np.arange(len(self._freqs))
         if freq_range is not None:
-            freq_slice = nx.where((self._freqs > freq_range[0]) & (
+            freq_slice = np.where((self._freqs > freq_range[0]) & (
                 self._freqs < freq_range[1]))[0]
         pxx = self._pxx[freq_slice, :, :]
-        S = pxx[:, :, :-1] * nx.conj(pxx[:, :, 1:])
-        S = nx.real(S * nx.exp(1j * phi))
-        temp_sum = nx.sum(S, axis=2)
+        S = pxx[:, :, :-1] * np.conj(pxx[:, :, 1:])
+        S = np.real(S * np.exp(1j * phi))
+        temp_sum = np.sum(S, axis=2)
         return temp_sum, self._freqs[freq_slice], self._psd_times
 
     def time_derivative(self, freq_range=None):
         return self.spec_derivative(freq_range, phi=0)
 
     def freq_derivative(self, freq_range=None):
-        return self.spec_derivative(freq_range, phi=nx.pi / 2)
+        return self.spec_derivative(freq_range, phi=np.pi / 2)
 
     def freq_modulation(self, freq_range=None):
-        max_time_deriv = nx.max(
+        max_time_deriv = np.max(
             self.time_derivative(freq_range=freq_range)[0]**2,
             axis=0)
-        max_freq_deriv = nx.max(
+        max_freq_deriv = np.max(
             self.freq_derivative(freq_range=freq_range)[0]**2,
             axis=0)
-        fm = nx.arctan(max_time_deriv / max_freq_deriv)
+        fm = np.arctan(max_time_deriv / max_freq_deriv)
         return fm, self._psd_times
 
     def max_spec_derivative(self, freq_range=None):
@@ -201,10 +202,10 @@ class Spectra(_BaseSpectra):
         times = time_deriv[2]
         time_deriv = time_deriv[0]
         freq_deriv = self.freq_derivative(freq_range=freq_range)[0]
-        fm = nx.arctan(nx.max(time_deriv**2,
-                              axis=0) / nx.max(freq_deriv**2,
+        fm = np.arctan(np.max(time_deriv**2,
+                              axis=0) / np.max(freq_deriv**2,
                                                axis=0))
-        max_spec_deriv = -time_deriv * nx.sin(fm) + freq_deriv * nx.cos(fm)
+        max_spec_deriv = -time_deriv * np.sin(fm) + freq_deriv * np.cos(fm)
         return max_spec_deriv, freqs, times
 
     def goodness_of_pitch(self, freq_range=None):
@@ -212,7 +213,7 @@ class Spectra(_BaseSpectra):
         pxx, freqs, times = self.power(freq_range)
         norm_max_ds = max_ds / pxx
         estimates2 = FFT_FN(norm_max_ds, axis=0)
-        g_of_p = nx.max(nx.abs(estimates2), axis=0)
+        g_of_p = np.max(np.abs(estimates2), axis=0)
         return g_of_p, times
 
     def spectrogram(self,
@@ -237,7 +238,7 @@ class Spectra(_BaseSpectra):
             ax = plt.gca()
         if derivative:
             pxx, f, t = self.max_spec_derivative(freq_range=freq_range)
-            thresh = value_from_dB(dB_thresh, nx.max(pxx))
+            thresh = value_from_dB(dB_thresh, np.max(pxx))
             ax.pcolorfast(t,
                           f,
                           pxx,
@@ -245,7 +246,7 @@ class Spectra(_BaseSpectra):
                           norm=colors.SymLogNorm(linthresh=thresh))
         else:
             pxx, f, t = self.power(freq_range)
-            thresh = value_from_dB(dB_thresh, nx.max(pxx))
+            thresh = value_from_dB(dB_thresh, np.max(pxx))
             ax.pcolorfast(t,
                           f,
                           pxx,
@@ -275,7 +276,7 @@ def multi_taper_fft_fn(n_tapers,
     noverlap = int(data_in_window - FFT_advance * sample_rate_ms)
     tapers = calc_tapers(data_in_window, NW / data_in_window, n_tapers)
     lambdas = calc_lambdas(data_in_window, NW / data_in_window, tapers)
-    padded_tapers = nx.zeros((n_tapers, NFFT))
+    padded_tapers = np.zeros((n_tapers, NFFT))
     padded_tapers[:, :data_in_window] = tapers
     return get_multi_taper_fn(padded_tapers, lambdas, NFFT)
 
@@ -286,7 +287,7 @@ def frequencies(NFFT, rate, freq_range=None):
     rate : sampling rate
     Returns a vector of frequencies given
     """
-    freqs = nx.arange(0, rate/2, rate/2 / (NFFT / 2 + 1))
+    freqs = np.arange(0, rate/2, rate/2 / (NFFT / 2 + 1))
     if freq_range is None:
         return freqs
     freq_mask = (freqs >= freq_range[0]) & (freqs < freq_range[1])
@@ -295,7 +296,7 @@ def frequencies(NFFT, rate, freq_range=None):
 
 def value_from_dB(dB, ref_power):
     """Converts a dB value to an absolute value, relative to the maximum value in pxx"""
-    return 10**(nx.log10(ref_power) - dB / 10)
+    return 10**(np.log10(ref_power) - dB / 10)
 
 def power_spectra_to_dB(pxx, dB_thresh=70, ref_power=None, derivative=False):
     """ Converts an array to decibels.
@@ -304,22 +305,22 @@ def power_spectra_to_dB(pxx, dB_thresh=70, ref_power=None, derivative=False):
     see also: amplitude()
     """
     if ref_power is None:
-        ref_power = nx.max(pxx)
+        ref_power = np.max(pxx)
     abs_thresh = value_from_dB(dB_thresh, ref_power)
     if not derivative:
         pxx[pxx < abs_thresh] = abs_thresh
-        return 10 * nx.log10(pxx / abs_thresh)
+        return 10 * np.log10(pxx / abs_thresh)
     pxx[(pxx >= 0) & (pxx < abs_thresh)] = abs_thresh
     pxx[(pxx < 0) & (pxx > -abs_thresh)] = -abs_thresh
-    pxx[pxx > 0] = 10 * nx.log10(pxx[pxx > 0] / abs_thresh)
-    pxx[pxx < 0] = -10 * nx.log10(-pxx[pxx < 0] / abs_thresh)
+    pxx[pxx > 0] = 10 * np.log10(pxx[pxx > 0] / abs_thresh)
+    pxx[pxx < 0] = -10 * np.log10(-pxx[pxx < 0] / abs_thresh)
     return pxx
 
 
 
 
 def noise_filter(psd, freqs, amp, t, noise_ratio=0.5, noise_cutoff=500):
-    noise_index = nx.max(nx.where(freqs < noise_cutoff)[0])
+    noise_index = np.max(np.where(freqs < noise_cutoff)[0])
     noise_power = psd[0:noise_index, :].sum(0)
     return noise_power / amp < noise_ratio
 
@@ -339,11 +340,11 @@ def amplitude(psd, freqs, t, noise_power=None, noise_ratio=None, baseline=70):
   """
     amp = psd.sum(0)
     if noise_power is not None:
-        small_amp = nx.where(amp < 1)[0]
+        small_amp = np.where(amp < 1)[0]
         amp[small_amp] = 1
         noise_filter = noise_power / amp < noise_ratio
         amp = amp * noise_filter
-    amp = nx.log10(amp + 1) * 10 - baseline
+    amp = np.log10(amp + 1) * 10 - baseline
     return amp, t
 
 
@@ -372,9 +373,9 @@ def power_limited_wiener_entropy(psd, freqs, t, power_limit=0.9):
     freqs = within_power_limit.sum(axis=0)
     arth_mean = limited_psd.sum(axis=0) / freqs
     log_psd = limited_psd + (cum_power > power_limit)
-    log_psd = nx.log(log_psd)
+    log_psd = np.log(log_psd)
     log_geo_mean = log_psd.sum(axis=0) / freqs
-    wiener = log_geo_mean - nx.log(arth_mean)
+    wiener = log_geo_mean - np.log(arth_mean)
     return wiener, t
 
 
@@ -394,9 +395,9 @@ def wiener_entropy(psd, freqs, t):
   """
     freqs = psd.shape[0]
     arth_mean = psd.sum(0) / freqs
-    pxx_t_log = nx.log(psd)
-    log_geo_mean = nx.sum(pxx_t_log, 0) / freqs
-    wiener = log_geo_mean - nx.log(arth_mean)
+    pxx_t_log = np.log(psd)
+    log_geo_mean = np.sum(pxx_t_log, 0) / freqs
+    wiener = log_geo_mean - np.log(arth_mean)
     return wiener, t
 
 
@@ -411,7 +412,7 @@ def spec_deriv_reduce_fn(estimates):
     K = x.shape[0]
     x_conj = x[1:, :].conj()
     x = x[:-1, :]
-    sum_over_k = nx.sum(x * x_conj, axis=0) / (K - 1)
+    sum_over_k = np.sum(x * x_conj, axis=0) / (K - 1)
     time_deriv = sum_over_k.real
     freq_deriv = sum_over_k.imag
     # which angle theta to use?
@@ -419,27 +420,27 @@ def spec_deriv_reduce_fn(estimates):
     # maximum magnitude at each point is arctan(freq_deriv/time_deriv)
 
     # as sap does it....
-    #  max_time_deriv = nx.max(time_deriv**2)
-    #  max_freq_deriv = nx.max(freq_deriv**2)
-    #  angle = nx.arctan(max_time_deriv/max_freq_deriv)
-    #  return -time_deriv*nx.sin(angle) + freq_deriv*nx.cos(angle)
+    #  max_time_deriv = np.max(time_deriv**2)
+    #  max_freq_deriv = np.max(freq_deriv**2)
+    #  angle = np.arctan(max_time_deriv/max_freq_deriv)
+    #  return -time_deriv*np.sin(angle) + freq_deriv*np.cos(angle)
 
-    angles = nx.arctan(-time_deriv / freq_deriv)
-    sine_angles = nx.sin(angles)
-    cosine_angles = nx.cos(angles)
-    angle_index = nx.argmax(nx.abs(cosine_angles * time_deriv - sine_angles *
+    angles = np.arctan(-time_deriv / freq_deriv)
+    sine_angles = np.sin(angles)
+    cosine_angles = np.cos(angles)
+    angle_index = np.argmax(np.abs(cosine_angles * time_deriv - sine_angles *
                                    freq_deriv))
     max_angle = angles[angle_index]
     max_angle1 = max_angle
-    max_angle2 = (max_angle + nx.pi) % (2 * nx.pi)
-    max_derivs = nx.array((time_deriv[angle_index], -freq_deriv[angle_index]))
-    max_value1 = nx.sum(max_derivs *
-                        nx.array((nx.cos(max_angle1), nx.sin(max_angle1))))
-    max_value2 = nx.sum(max_derivs *
-                        nx.array((nx.cos(max_angle2), nx.sin(max_angle2))))
+    max_angle2 = (max_angle + np.pi) % (2 * np.pi)
+    max_derivs = np.array((time_deriv[angle_index], -freq_deriv[angle_index]))
+    max_value1 = np.sum(max_derivs *
+                        np.array((np.cos(max_angle1), np.sin(max_angle1))))
+    max_value2 = np.sum(max_derivs *
+                        np.array((np.cos(max_angle2), np.sin(max_angle2))))
     if max_value2 > max_value1:
         max_angle = max_angle2
-    max_cos, max_sin = (nx.cos(max_angle), nx.sin(max_angle))
+    max_cos, max_sin = (np.cos(max_angle), np.sin(max_angle))
     spec_deriv = time_deriv * max_cos - freq_deriv * max_sin
     return spec_deriv
 
@@ -503,17 +504,17 @@ def multi_taper_psd(psd_generator):
     for spectrum, time in psd_generator:
         pxx.append(spectrum)
         t.append(time)
-    pxx = nx.swapaxes(nx.array(pxx), 0, 1)  # freq needs to be first dim
-    return pxx, nx.array(t)
+    pxx = np.swapaxes(np.array(pxx), 0, 1)  # freq needs to be first dim
+    return pxx, np.array(t)
 
 
 # --- Multi-taper machinery ---
 
 
 def taper_diags(N, W):
-    t = nx.arange(0, N)
-    diag = (N - 1 - 2 * t)**2 / 4 * nx.cos(2 * nx.pi * W)
-    t = nx.arange(1, N)
+    t = np.arange(0, N)
+    diag = (N - 1 - 2 * t)**2 / 4 * np.cos(2 * np.pi * W)
+    t = np.arange(1, N)
     off_diag = t * (N - t) / 2
     return diag, off_diag
 
@@ -523,14 +524,14 @@ def taper_matrix(N, W):
     Generates the matrix used for taper calculations.
     """
     N = int(N)
-    m = nx.zeros((N, N))
+    m = np.zeros((N, N))
     n = 0
     # diagonal
     diag, off_diag = taper_diags(N, W)
-    diag_indices = nx.arange(0, N) * (N + 1)
-    nx.put(m, diag_indices, diag)
-    nx.put(m, (diag_indices[0:-1] + 1), off_diag)
-    nx.put(m, (diag_indices[1:] - 1), off_diag)
+    diag_indices = np.arange(0, N) * (N + 1)
+    np.put(m, diag_indices, diag)
+    np.put(m, (diag_indices[0:-1] + 1), off_diag)
+    np.put(m, (diag_indices[1:] - 1), off_diag)
     return m
 
 
@@ -544,11 +545,11 @@ def calc_tapers(N, W, taper_count):
     taper_count: number of desired tapers
   Returns taper_count x N matrix of tapers.
   """
-    tapers = nx.zeros((N, taper_count))
-    m = nx.zeros((N, N))
+    tapers = np.zeros((N, taper_count))
+    m = np.zeros((N, N))
     n = 0
     m = taper_matrix(N, W)
-    vals, vects = nx.linalg.eigh(m)
+    vals, vects = np.linalg.eigh(m)
     # find largest eigenvalues
     taper_indices = []
     vals_sorted = vals.copy()
@@ -558,7 +559,7 @@ def calc_tapers(N, W, taper_count):
     biggest_vals = list(vals_sorted[-taper_count:])
     biggest_vals.reverse()
     for t in range(taper_count):
-        index = nx.where(vals == biggest_vals[t])[0]
+        index = np.where(vals == biggest_vals[t])[0]
         index = index[0]
         taper_indices.append(index)
     # note - tapers are normalized
@@ -567,23 +568,23 @@ def calc_tapers(N, W, taper_count):
         taper = vects[:, taper_indices[k]]
         if k % 2 == 0:
             # even
-            if nx.sum(taper) < 0:
+            if np.sum(taper) < 0:
                 taper = -taper
         else:
-            if nx.sum((N - 1 - nx.arange(N)) * taper) < 0:
+            if np.sum((N - 1 - np.arange(N)) * taper) < 0:
                 taper = -taper
         tapers[:, k] = taper
     return tapers.transpose()
 
 
 def sinc_matrix(N, W):
-    A = nx.zeros((N, N))
-    t = nx.arange(1, N)
-    master_row = nx.sin(2 * nx.pi * W * t) / (nx.pi * t)
+    A = np.zeros((N, N))
+    t = np.arange(1, N)
+    master_row = np.sin(2 * np.pi * W * t) / (np.pi * t)
     master_row = list(master_row[::-1]) + [2 * W] + list(master_row)
-    master_row = nx.array(master_row)
-    row = nx.arange(0, N) + N - 1
-    for r in nx.arange(N):
+    master_row = np.array(master_row)
+    row = np.arange(0, N) + N - 1
+    for r in np.arange(N):
         A[r, :] = master_row[row - r]
     return A
 
@@ -592,13 +593,13 @@ def calc_lambdas(N, W, tapers):
     A = sinc_matrix(N, W)
     taper_count = tapers.shape[0]
     lambdas = []
-    for t in nx.arange(taper_count):
+    for t in np.arange(taper_count):
         taper = tapers[t, :]
-        LHS = nx.dot(A, taper)
+        LHS = np.dot(A, taper)
         RHS = taper
-        lam = nx.mean(LHS / RHS)
+        lam = np.mean(LHS / RHS)
         lambdas.append(lam)
-    return nx.array(lambdas)
+    return np.array(lambdas)
 
 
 def multi_taper(signal, rate, tapers, lambdas, NFFT):
@@ -621,22 +622,22 @@ def multi_taper(signal, rate, tapers, lambdas, NFFT):
     estimates2 = signal * tapers[:, :len(signal)]
     # calculates 1D FFT for each row in one call
     estimates2 = FFT_FN(estimates2, n=NFFT, axis=1)
-    estimates2 = estimates2[:, 0:(NFFT // 2 + 1)] * weights[:, nx.newaxis]
+    estimates2 = estimates2[:, 0:(NFFT // 2 + 1)] * weights[:, np.newaxis]
     spectrum2 = estimates2.transpose()
 
     ### I used the code below to verify that
     ### the optimized code above calculates expected
     ### values.
 
-    #  estimates = nx.zeros((taper_count, N/2 + 1))
+    #  estimates = np.zeros((taper_count, N/2 + 1))
     #  for t in range(taper_count):
     #    weight = 1/N * lambdas[t]
-    #    estimate = nx.fft.fft(signal*tapers[t,:])
+    #    estimate = np.fft.fft(signal*tapers[t,:])
     #    estimate = estimate[0:(N/2 + 1)]
-    #    estimate = nx.square(nx.abs(estimate))
+    #    estimate = np.square(np.abs(estimate))
     #    estimates[t, :] = estimate * weight
     ##  spectrum = estimates.sum(0) ** 0.5
     #  spectrum = estimates.sum(0)
-    #  if (nx.any(spectrum != spectrum2)):
+    #  if (np.any(spectrum != spectrum2)):
     #    print 'Not equal!'
     return spectrum2

@@ -32,6 +32,11 @@ spec.spectrogram()
 
 ![Example spectrogram](spectrogram_example.png)
 
+## Tips for speed
+
++ Install scipy, which allows `resin` to use a faster fft library than the numpy default. In my experience, scipy's fft is about 40% faster than numpy's, even when using the Anaconda MKL FFT.
++ Use an NFFT equal to a power of 2 (512, 1024, etc.)
+
 ## Authors
 
 Mike Lusignan wrote `segmentation` as part of his PhD thesis. Details of the algorithms can be found in: 
