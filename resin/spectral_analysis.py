@@ -9,10 +9,10 @@ import numpy as np
 # I find scipy to be about 50% faster
 try:
     import scipy.fftpack
-    FFT_FN = scipy.fftpack.rfft
+    FFT_FN = scipy.fftpack.fft
     USE_SCIPY = True
 except ImportError:
-    FFT_FN = np.fft.rfft
+    FFT_FN = np.fft.fft
     USE_SCIPY = False
 
 
