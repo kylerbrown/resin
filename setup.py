@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='resin',
-      version='0.1',
+      version='0.2',
       description='spectral analysis tools, similar to Sound Analysis Pro',
       url='http://github.com/kylerbrown/resin',
       author='Kyler Brown',

@@ -19,12 +19,12 @@ except ImportError:
 class BaseSpectra:
     def __init__(self,
                  rate,
-                 freq_range=None,
-                 NFFT=1024,
-                 noverlap=512,
-                 data_window=1024,
-                 n_tapers=4,
-                 NW=1.5):
+                 NFFT,
+                 noverlap,
+                 data_window,
+                 n_tapers,
+                 NW,
+                 freq_range=None):
         """
         rate   - the sampling rate of the signal
         NFFT   - number of points in Fourier transform
@@ -36,6 +36,7 @@ class BaseSpectra:
         NW    - multi-taper bandwidth parameter for custom multi-taper Fourier
                 transform estimate increasing this value reduces side-band
                 ripple, decreasing sharpens peaks
+        freq_range - optional, the range of frequencies to use for analysis. A tuple of length 2.
         """
         self._rate = rate
         self._NFFT = NFFT
@@ -261,7 +262,30 @@ class Spectra(BaseSpectra):
         return ax
 
 
-# --- spectral feature functions ---
+def sap_spectra(sampling_rate, freq_range=None):
+    ''' Creates a SAP-like spectrogram object for a given sampling rate.
+    For greater control, create a custom Spectra object. 
+    
+    Results are slightly different from SAP, because SAP does a incorrect version of
+    multi-taper estimation.
+    '''
+    # SAP params
+    NFFT = 1024
+    data_window_s = 0.00927
+    FFT_advance_s = 0.00136
+    data_window = int(data_window_s * sampling_rate)
+    noverlap = NFFT - int(FFT_advance_s * sampling_rate)
+    spa = Spectra(sampling_rate,
+                  NFFT=NFFT,
+                  freq_range=freq_range,
+                  data_window=data_window,
+                  noverlap=noverlap,
+                  n_tapers=2,
+                  NW=1.5)
+    return spa
+
+
+    # --- spectral feature functions ---
 def frequencies(NFFT, rate, freq_range=None):
     """
     NFFT : number of FFT points

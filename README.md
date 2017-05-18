@@ -18,19 +18,34 @@ pip install .
 ```
 ## Usage example
 
+The folder `examples` contains some example usage.
+
 ```python
-from resin import Spectra
-spec = Spectra(rate=30000, 
-		NFFT=512,
-		data_window=500,
-		noverlap=412,
-		n_tapers=4,
-		freq_range=(300, 90000))
-spec.signal(data)
-spec.spectrogram()
+# loading in the data
+sr, data = wavfile.read('black33.wav')
+# create a Spectra object using SAP-like defaults
+spa = resin.sap_spectra(sr)
+spa.signal(data)
+spa.spectrogram()
 ```
 
-![Example spectrogram](spectrogram_example.png)
+![Example spectrogram 1](examples/example1_sap.png)
+
+```python
+# Alternately, customize the mutli-taper parameters
+# by creating a Spectra object directly.
+
+spa2 = resin.Spectra(sr, 
+                    NFFT=1024, 
+                    noverlap=1000, 
+                    data_window=int(0.01 * sr), 
+                    n_tapers=3, 
+                    NW=1.8,
+                    freq_range=(300, 9000))
+spa2.signal(data)
+spa2.spectrogram()
+```
+![Example spectrogram 2](examples/example1_custom_spectrogram.png)
 
 ## Tips for speed
 

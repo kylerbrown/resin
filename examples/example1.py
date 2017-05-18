@@ -16,13 +16,13 @@ plt.cla()
 # Alternately, customize the mutli-taper parameters
 # by creating a Spectra object directly.
 
-spa2 = resin.Spectra(sr, 
-                    NFFT=1024, 
-                    noverlap=1000, 
-                    data_window=int(0.01 * sr), 
-                    n_tapers=3, 
-                    NW=1.8,
-                    freq_range=(300, 9000))
+spa2 = resin.Spectra(sr,
+                     NFFT=1024,
+                     noverlap=1000,
+                     data_window=int(0.01 * sr),
+                     n_tapers=3,
+                     NW=1.8,
+                     freq_range=(300, 9000))
 spa2.signal(data)
 spa2.spectrogram()
 plt.savefig('example1_custom_spectrogram.png')
