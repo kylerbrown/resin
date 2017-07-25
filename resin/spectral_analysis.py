@@ -228,7 +228,8 @@ class Spectra(BaseSpectra):
                     freq_range=None,
                     dB_thresh=35,
                     derivative=True,
-                    colormap='inferno'):
+                    colormap='inferno',
+                    compensated=False):
         """Plots a spectrogram, requires matplotlib
         ax - axis on which to plot
         freq_range - a tuple of frequencies, eg (300, 8000)
@@ -236,9 +237,15 @@ class Spectra(BaseSpectra):
                      decrease to improve detail
         derivative - if True, plots the spectral derivative, SAP style
         colormap   - colormap to use, good values: 'inferno', 'gray'
+        compensated - if True, moves the timing of a powerspectra to the center of the
+                        data window.
 
         Returns an axis object
         """
+        if compensated:
+            comp = (self._data_in_window / 2) / self._rate
+        else:
+            comp = 0
         from matplotlib import colors
         if ax is None:
             import matplotlib.pyplot as plt
@@ -246,7 +253,7 @@ class Spectra(BaseSpectra):
         if derivative:
             pxx, f, t = self.max_spec_derivative(freq_range=freq_range)
             thresh = value_from_dB(dB_thresh, np.max(pxx))
-            ax.pcolorfast(t,
+            ax.pcolorfast(t + comp,
                           f,
                           pxx,
                           cmap=colormap,
@@ -254,7 +261,7 @@ class Spectra(BaseSpectra):
         else:
             pxx, f, t = self.power(freq_range)
             thresh = value_from_dB(dB_thresh, np.max(pxx))
-            ax.pcolorfast(t,
+            ax.pcolorfast(t + comp,
                           f,
                           pxx,
                           cmap=colormap,
@@ -480,12 +487,11 @@ def iter_mt(signal, rate, NFFT, noverlap, freq_range, data_in_window, tapers,
         data_in_window = NFFT
         print('warning, data window larger than NFFT')
     freqs = frequencies(NFFT, rate)
-    if freq_range:
-        freq_mask = (freqs >= freq_range[0]) & (freqs < freq_range[1])
     for window_start in range(0, len(signal), NFFT - noverlap):
         signal_interval = signal[window_start:window_start + data_in_window]
         spectrum = multi_taper(signal_interval, rate, tapers, lambdas, NFFT)
         if freq_range is not None:
+            freq_mask = (freqs >= freq_range[0]) & (freqs < freq_range[1])
             yield spectrum[freq_mask], window_start / rate
         else:
             yield spectrum, window_start / rate
