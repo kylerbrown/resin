@@ -228,7 +228,7 @@ class Spectra(BaseSpectra):
                     freq_range=None,
                     dB_thresh=35,
                     derivative=True,
-                    colormap='inferno',
+                    colormap='gray',
                     compensated=False):
         """Plots a spectrogram, requires matplotlib
         ax - axis on which to plot
