@@ -240,12 +240,16 @@ class Spectra(BaseSpectra):
         compensated - if True, centers the displayed window around the center
                         of the short FFT. If False, the window always starts
                         at the begining of data window. Both methods are equivalent
-                        when n_overlap = 0.
+                        when n_overlap = 0 and the data window length is the full NFFT.
 
         Returns an axis object
         """
         if compensated:
-            comp = (self._noverlap / 2) / self._rate
+            data_overlap = self._noverlap + self._data_in_window - self._NFFT 
+            if data_overlap < 0:
+                print('warning: spectrogram does not fully cover the data')
+                data_overlap = 0
+            comp = (data_overlap / 2) / self._rate
         else:
             comp = 0
         from matplotlib import colors
