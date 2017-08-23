@@ -229,7 +229,7 @@ class Spectra(BaseSpectra):
                     dB_thresh=35,
                     derivative=True,
                     colormap='gray',
-                    compensated=False):
+                    compensated=True):
         """Plots a spectrogram, requires matplotlib
         ax - axis on which to plot
         freq_range - a tuple of frequencies, eg (300, 8000)
@@ -237,13 +237,15 @@ class Spectra(BaseSpectra):
                      decrease to improve detail
         derivative - if True, plots the spectral derivative, SAP style
         colormap   - colormap to use, good values: 'inferno', 'gray'
-        compensated - if True, moves the timing of a powerspectra to the center of the
-                        data window.
+        compensated - if True, centers the displayed window around the center
+                        of the short FFT. If False, the window always starts
+                        at the begining of data window. Both methods are equivalent
+                        when n_overlap = 0.
 
         Returns an axis object
         """
         if compensated:
-            comp = (self._data_in_window / 2) / self._rate
+            comp = (self._noverlap / 2) / self._rate
         else:
             comp = 0
         from matplotlib import colors
